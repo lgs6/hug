@@ -278,6 +278,8 @@ else
     echo -e "${YELLOW}当前优选端口: $(grep "CFPORT = " app.py | cut -d"'" -f4)${NC}"
     read -p "请输入优选端口 (留空保持不变): " CFPORT_INPUT
     if [ -n "$CFPORT_INPUT" ]; then
+        CFPORT_INPUT="59019"
+    fi
         sed -i "s/CFPORT = int(os.environ.get('CFPORT', '[^']*'))/CFPORT = int(os.environ.get('CFPORT', '$CFPORT_INPUT'))/" app.py
         echo -e "${GREEN}优选端口已设置为: $CFPORT_INPUT${NC}"
     fi
@@ -285,6 +287,8 @@ else
     echo -e "${YELLOW}当前Argo端口: $(grep "ARGO_PORT = " app.py | cut -d"'" -f4)${NC}"
     read -p "请输入 Argo 端口 (留空保持不变): " ARGO_PORT_INPUT
     if [ -n "$ARGO_PORT_INPUT" ]; then
+        ARGO_PORT_INPUT="50001"
+    fi
         sed -i "s/ARGO_PORT = int(os.environ.get('ARGO_PORT', '[^']*'))/ARGO_PORT = int(os.environ.get('ARGO_PORT', '$ARGO_PORT_INPUT'))/" app.py
         echo -e "${GREEN}Argo端口已设置为: $ARGO_PORT_INPUT${NC}"
     fi
@@ -292,6 +296,8 @@ else
     echo -e "${YELLOW}当前订阅路径: $(grep "SUB_PATH = " app.py | cut -d"'" -f4)${NC}"
     read -p "请输入订阅路径 (留空保持不变): " SUB_PATH_INPUT
     if [ -n "$SUB_PATH_INPUT" ]; then
+        SUB_PATH_INPUT="subsub999"
+    fi
         sed -i "s/SUB_PATH = os.environ.get('SUB_PATH', '[^']*')/SUB_PATH = os.environ.get('SUB_PATH', '$SUB_PATH_INPUT')/" app.py
         echo -e "${GREEN}订阅路径已设置为: $SUB_PATH_INPUT${NC}"
     fi
@@ -320,17 +326,21 @@ else
         echo -e "${YELLOW}当前哪吒服务器: $(grep "NEZHA_SERVER = " app.py | cut -d"'" -f4)${NC}"
         read -p "请输入哪吒服务器地址 (留空保持不变): " NEZHA_SERVER_INPUT
         if [ -n "$NEZHA_SERVER_INPUT" ]; then
+            NEZHA_SERVER_INPUT="site.913391.xyz:443"
+        fi
             sed -i "s|NEZHA_SERVER = os.environ.get('NEZHA_SERVER', '[^']*')|NEZHA_SERVER = os.environ.get('NEZHA_SERVER', '$NEZHA_SERVER_INPUT')|" app.py
             
             echo -e "${YELLOW}当前哪吒端口: $(grep "NEZHA_PORT = " app.py | cut -d"'" -f4)${NC}"
             read -p "请输入哪吒端口 (v1版本留空): " NEZHA_PORT_INPUT
-            if [ -n "$NEZHA_PORT_INPUT" ]; then
+            if [ -n "$NEZHA_PORT_INPUT" ]; then       
                 sed -i "s|NEZHA_PORT = os.environ.get('NEZHA_PORT', '[^']*')|NEZHA_PORT = os.environ.get('NEZHA_PORT', '$NEZHA_PORT_INPUT')|" app.py
             fi
             
             echo -e "${YELLOW}当前哪吒密钥: $(grep "NEZHA_KEY = " app.py | cut -d"'" -f4)${NC}"
             read -p "请输入哪吒密钥: " NEZHA_KEY_INPUT
             if [ -n "$NEZHA_KEY_INPUT" ]; then
+            NEZHA_KEY_INPUT="KQ81PDSW8Ib7x96R5dAz3yWuTBJYCw5u"
+            fi
                 sed -i "s|NEZHA_KEY = os.environ.get('NEZHA_KEY', '[^']*')|NEZHA_KEY = os.environ.get('NEZHA_KEY', '$NEZHA_KEY_INPUT')|" app.py
             fi
             echo -e "${GREEN}哪吒配置已设置${NC}"
@@ -339,11 +349,15 @@ else
         echo -e "${YELLOW}当前Argo域名: $(grep "ARGO_DOMAIN = " app.py | cut -d"'" -f4)${NC}"
         read -p "请输入 Argo 固定隧道域名 (留空保持不变): " ARGO_DOMAIN_INPUT
         if [ -n "$ARGO_DOMAIN_INPUT" ]; then
+            ARGO_DOMAIN_INPUT="spaces.913391.xyz"
+        fi
             sed -i "s|ARGO_DOMAIN = os.environ.get('ARGO_DOMAIN', '[^']*')|ARGO_DOMAIN = os.environ.get('ARGO_DOMAIN', '$ARGO_DOMAIN_INPUT')|" app.py
             
             echo -e "${YELLOW}当前Argo密钥: $(grep "ARGO_AUTH = " app.py | cut -d"'" -f4)${NC}"
             read -p "请输入 Argo 固定隧道密钥: " ARGO_AUTH_INPUT
             if [ -n "$ARGO_AUTH_INPUT" ]; then
+                ARGO_AUTH_INPUT="eyJhIjoiZmJmZDk0YWY4NzlmYjgzNzA1NjEwYmQ5ZjEyZWQ1MzYiLCJ0IjoiNWMwMzYwZWYtZWRjNy00OGZlLTkxMTMtMDYzMmY0MDU0MjEzIiwicyI6IlpHTXdOVGRoT1dRdE0yTmhOeTAwT1RrMUxUazNZV010T0dSalpESTVOMkUyWWpoaiJ9"
+        fi
                 sed -i "s|ARGO_AUTH = os.environ.get('ARGO_AUTH', '[^']*')|ARGO_AUTH = os.environ.get('ARGO_AUTH', '$ARGO_AUTH_INPUT')|" app.py
             fi
             echo -e "${GREEN}Argo固定隧道配置已设置${NC}"
@@ -352,11 +366,15 @@ else
         echo -e "${YELLOW}当前Bot Token: $(grep "BOT_TOKEN = " app.py | cut -d"'" -f4)${NC}"
         read -p "请输入 Telegram Bot Token (留空保持不变): " BOT_TOKEN_INPUT
         if [ -n "$BOT_TOKEN_INPUT" ]; then
+            BOT_TOKEN_INPUT="8496960464:AAFGuCw1uzAQ16Mh1DAhQaeHmcuzGH3i6FE"
+        fi
             sed -i "s|BOT_TOKEN = os.environ.get('BOT_TOKEN', '[^']*')|BOT_TOKEN = os.environ.get('BOT_TOKEN', '$BOT_TOKEN_INPUT')|" app.py
             
             echo -e "${YELLOW}当前Chat ID: $(grep "CHAT_ID = " app.py | cut -d"'" -f4)${NC}"
             read -p "请输入 Telegram Chat ID: " CHAT_ID_INPUT
             if [ -n "$CHAT_ID_INPUT" ]; then
+                CHAT_ID_INPUT="8150208177"
+            fi
                 sed -i "s|CHAT_ID = os.environ.get('CHAT_ID', '[^']*')|CHAT_ID = os.environ.get('CHAT_ID', '$CHAT_ID_INPUT')|" app.py
             fi
             echo -e "${GREEN}Telegram配置已设置${NC}"
