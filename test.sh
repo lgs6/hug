@@ -6,13 +6,13 @@
 # ==================================================
 
 # VLESS UUID，必填，可使用 https://www.uuidgenerator.net/ 在线生成
-UUID_INPUT="de04add9-5c68-479a-9b80-600a850102ce"
+UUID_INPUT="67ed0641-8db7-4100-acf1-20c12415d447"
 
 # 节点名称，可选，留空则使用默认名称
-NAME_INPUT="My-Awesome-Node"
+NAME_INPUT="美国-hug"
 
 # 服务端口，可选，默认为 3000
-PORT_INPUT="3000"
+PORT_INPUT="50908"
 
 # Cloudflare 优选 IP/域名，可选，默认为 joeyblog.net
 CFIP_INPUT="joeyblog.net"
@@ -21,10 +21,10 @@ CFIP_INPUT="joeyblog.net"
 CFPORT_INPUT="443"
 
 # Argo 端口，可选，默认为 3001
-ARGO_PORT_INPUT="3001"
+ARGO_PORT_INPUT="50001"
 
 # 订阅路径，可选，默认为 sub
-SUB_PATH_INPUT="sub"
+SUB_PATH_INPUT="sub888"
 
 # --- 高级选项 (如不需要请留空) ---
 
@@ -40,31 +40,31 @@ KEEP_ALIVE_HF="true"
 
 # Hugging Face 访问令牌 (Token)，开启保活时必填
 # 获取地址: https://huggingface.co/settings/tokens
-HF_TOKEN_INPUT="your_huggingface_token_here"
+HF_TOKEN_INPUT="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"
 
 # Hugging Face 仓库 ID，开启保活时必填 (例如: joeyhuangt/aaaa)
-HF_REPO_ID_INPUT="your_huggingface_repo_id_here"
+HF_REPO_ID_INPUT="SenLinJi/bot"
 
 # 哪吒服务器地址，可选
-NEZHA_SERVER_INPUT=""
+NEZHA_SERVER_INPUT="site.913391.xyz:443"
 
 # 哪吒端口，可选 (v1 版本留空)
 NEZHA_PORT_INPUT=""
 
 # 哪吒密钥，可选
-NEZHA_KEY_INPUT=""
+NEZHA_KEY_INPUT="KQ81PDSW8Ib7x96R5dAz3yWuTBJYCw5u"
 
 # Argo 固定隧道域名，可选
-ARGO_DOMAIN_INPUT=""
+ARGO_DOMAIN_INPUT="spaces.913391.xyz"
 
 # Argo 固定隧道密钥 (Token)，可选
-ARGO_AUTH_INPUT=""
+ARGO_AUTH_INPUT="eyJhIjoiZmJmZDk0YWY4NzlmYjgzNzA1NjEwYmQ5ZjEyZWQ1MzYiLCJ0IjoiNWMwMzYwZWYtZWRjNy00OGZlLTkxMTMtMDYzMmY0MDU0MjEzIiwicyI6IlpHTXdOVGRoT1dRdE0yTmhOeTAwT1RrMUxUazNZV010T0dSalpESTVOMkUyWWpoaiJ9"
 
 # Telegram Bot Token，可选
-BOT_TOKEN_INPUT=""
+BOT_TOKEN_INPUT="8496960464:AAFGuCw1uzAQ16Mh1DAhQaeHmcuzGH3i6FE"
 
 # Telegram Chat ID，可选
-CHAT_ID_INPUT=""
+CHAT_ID_INPUT="8150208177"
 
 # ==================================================
 # 脚本主体部分，通常无需修改以下内容
