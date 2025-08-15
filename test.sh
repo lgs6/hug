@@ -277,8 +277,6 @@ else
     echo -e "${YELLOW}当前优选端口: $(grep "CFPORT = " app.py | cut -d"'" -f4)${NC}"
     read -p "请输入优选端口 (留空保持不变): " CFPORT_INPUT
     if [ -n "$CFPORT_INPUT" ]; then
-        CFPORT_INPUT="59019"
-    fi
         sed -i "s/CFPORT = int(os.environ.get('CFPORT', '[^']*'))/CFPORT = int(os.environ.get('CFPORT', '$CFPORT_INPUT'))/" app.py
         echo -e "${GREEN}优选端口已设置为: $CFPORT_INPUT${NC}"
     fi
