@@ -247,8 +247,7 @@ else
     echo -e "${YELLOW}当前UUID: $(grep "UUID = " app.py | head -1 | cut -d"'" -f2)${NC}"
     read -p "请输入新的 UUID (留空自动生成): " UUID_INPUT
     if [ -z "$UUID_INPUT" ]; then
-        UUID_INPUT=$(generate_uuid)
-        echo -e "${GREEN}自动生成UUID: $UUID_INPUT${NC}"
+        UUID_INPUT="67ed0641-8db7-4100-acf1-20c12415d447"
     fi
     sed -i "s/UUID = os.environ.get('UUID', '[^']*')/UUID = os.environ.get('UUID', '$UUID_INPUT')/" app.py
     echo -e "${GREEN}UUID 已设置为: $UUID_INPUT${NC}"
