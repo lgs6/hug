@@ -291,20 +291,16 @@ else
         sed -i "s/ARGO_PORT = int(os.environ.get('ARGO_PORT', '[^']*'))/ARGO_PORT = int(os.environ.get('ARGO_PORT', '$ARGO_PORT_INPUT'))/" app.py
         echo -e "${GREEN}Argo端口已设置为: $ARGO_PORT_INPUT${NC}"
     fi
-
     echo -e "${YELLOW}当前订阅路径: $(grep "SUB_PATH = " app.py | cut -d"'" -f4)${NC}"
     read -p "请输入订阅路径 (留空保持不变): " SUB_PATH_INPUT
     if [ -n "$SUB_PATH_INPUT" ]; then
-        SUB_PATH_INPUT="subsub999"
-    fi
         sed -i "s/SUB_PATH = os.environ.get('SUB_PATH', '[^']*')/SUB_PATH = os.environ.get('SUB_PATH', '$SUB_PATH_INPUT')/" app.py
         echo -e "${GREEN}订阅路径已设置为: $SUB_PATH_INPUT${NC}"
     fi
-
     echo
     echo -e "${YELLOW}是否配置高级选项? (y/n)${NC}"
     read -p "> " ADVANCED_CONFIG
-
+    
     if [ "$ADVANCED_CONFIG" = "y" ] || [ "$ADVANCED_CONFIG" = "Y" ]; then
         echo -e "${YELLOW}当前上传URL: $(grep "UPLOAD_URL = " app.py | cut -d"'" -f4)${NC}"
         read -p "请输入上传URL (留空保持不变): " UPLOAD_URL_INPUT
