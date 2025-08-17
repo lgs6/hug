@@ -86,7 +86,6 @@ NC='\033[0m'
 NODE_INFO_FILE="$HOME/.xray_nodes_info"
 PROJECT_DIR_NAME="python-xray-argo"
 
-# --- 辅助函数：生成 UUID ---
 generate_uuid() {
     if command -v uuidgen &> /dev/null; then
         uuidgen | tr '[:upper:]' '[:lower:]'
@@ -97,25 +96,17 @@ generate_uuid() {
     fi
 }
 
-# --- 脚本主流程 ---
 clear
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}  Python Xray Argo 部署脚本 (全自动版)  ${NC}"
 echo -e "${GREEN}========================================${NC}"
-echo
-echo -e "${BLUE}检测到无交互模式，将使用脚本内预设的参数进行部署...${NC}"
+echo -e "\n${BLUE}检测到无交互模式，将使用脚本内预设的参数进行部署...${NC}"
 
-# 1. 检查并安装依赖
 echo -e "\n${YELLOW}--> 步骤 1/4: 检查并安装依赖...${NC}"
-if ! command -v python3 &> /dev/null; then
-    sudo apt-get update && sudo apt-get install -y python3 python3-pip
-fi
-if ! python3 -c "import requests" &> /dev/null; then
-    pip3 install requests
-fi
+if ! command -v python3 &> /dev/null; then sudo apt-get update && sudo apt-get install -y python3 python3-pip; fi
+if ! python3 -c "import requests" &> /dev/null; then pip3 install requests; fi
 echo -e "${GREEN}依赖检查完成。${NC}"
 
-# 2. 准备项目文件
 echo -e "\n${YELLOW}--> 步骤 2/4: 准备项目文件...${NC}"
 if [ ! -d "$PROJECT_DIR_NAME" ]; then
     echo "正在从 GitHub 下载项目..."
@@ -131,22 +122,18 @@ cd "$PROJECT_DIR_NAME"
 cp app.py app.py.backup
 echo -e "${GREEN}项目文件准备就绪。${NC}"
 
-# 3. 应用固定配置
 echo -e "\n${YELLOW}--> 步骤 3/4: 应用预设参数配置...${NC}"
-# 处理 UUID
 if [ -z "$UUID" ]; then
     UUID=$(generate_uuid)
     echo "UUID为空，已自动生成: $UUID"
 fi
 sed -i "s/UUID = os.environ.get('UUID', '[^']*')/UUID = os.environ.get('UUID', '$UUID')/" app.py
-
-# 处理其他参数
 if [ -n "$NAME" ]; then sed -i "s/NAME = os.environ.get('NAME', '[^']*')/NAME = os.environ.get('NAME', '$NAME')/" app.py; fi
 if [ -n "$PORT" ]; then sed -i "s/PORT = int(os.environ.get('SERVER_PORT') or os.environ.get('PORT') or [0-9]*)/PORT = int(os.environ.get('SERVER_PORT') or os.environ.get('PORT') or $PORT)/" app.py; fi
 if [ -z "$CFIP" ]; then CFIP="joeyblog.net"; fi
 sed -i "s/CFIP = os.environ.get('CFIP', '[^']*')/CFIP = os.environ.get('CFIP', '$CFIP')/" app.py
 if [ -n "$CFPORT" ]; then sed -i "s/CFPORT = int(os.environ.get('CFPORT', '[^']*'))/CFPORT = int(os.environ.get('CFPORT', '$CFPORT'))/" app.py; fi
-if [ -n "$ARGO_PORT" ]; then sed -i "s/ARGO_PORT = int(os.environ.get('ARGO_PORT', '[^']*'))/ARGO_PORT = int(os.environ.get('ARGO_PORT', '$ARGO_PORT_INPUT'))/" app.py; fi
+if [ -n "$ARGO_PORT" ]; then sed -i "s/ARGO_PORT = int(os.environ.get('ARGO_PORT', '[^']*'))/ARGO_PORT = int(os.environ.get('ARGO_PORT', '$ARGO_PORT'))/" app.py; fi
 if [ -n "$SUB_PATH" ]; then sed -i "s/SUB_PATH = os.environ.get('SUB_PATH', '[^']*')/SUB_PATH = os.environ.get('SUB_PATH', '$SUB_PATH')/" app.py; fi
 if [ -n "$NEZHA_SERVER" ]; then sed -i "s|NEZHA_SERVER = os.environ.get('NEZHA_SERVER', '[^']*')|NEZHA_SERVER = os.environ.get('NEZHA_SERVER', '$NEZHA_SERVER')|" app.py; fi
 if [ -n "$NEZHA_PORT" ]; then sed -i "s|NEZHA_PORT = os.environ.get('NEZHA_PORT', '[^']*')|NEZHA_PORT = os.environ.get('NEZHA_PORT', '$NEZHA_PORT')|" app.py; fi
@@ -157,11 +144,9 @@ if [ -n "$BOT_TOKEN" ]; then sed -i "s|BOT_TOKEN = os.environ.get('BOT_TOKEN', '
 if [ -n "$CHAT_ID" ]; then sed -i "s|CHAT_ID = os.environ.get('CHAT_ID', '[^']*')|CHAT_ID = os.environ.get('CHAT_ID', '$CHAT_ID')|" app.py; fi
 echo -e "${GREEN}所有参数已成功写入配置文件。${NC}"
 
-# 4. 启动服务并输出结果
 echo -e "\n${YELLOW}--> 步骤 4/4: 启动服务并生成节点...${NC}"
 
-# 应用优化补丁（这部分逻辑与之前版本相同）
-# ...[此处省略了与之前版本完全相同的 youtube_patch.py 创建与执行逻辑]...
+# 这是之前遗漏的关键部分：应用YouTube分流和80端口节点的Python补丁
 cat > youtube_patch.py << 'EOF'
 # coding: utf-8
 import os, base64, json, subprocess, time
@@ -223,6 +208,7 @@ trojan://{UUID}@{CFIP}:80?security=none&type=ws&host={argo_domain}&path=%2Ftroja
 content = content.replace(old_generate_function, new_generate_function)
 with open('app.py', 'w', encoding='utf-8') as f: f.write(content)
 EOF
+
 python3 youtube_patch.py && rm youtube_patch.py
 
 pkill -f "python3 app.py" > /dev/null 2>&1 && sleep 2
@@ -253,7 +239,6 @@ if [ -z "$NODE_INFO" ]; then
     exit 1
 fi
 
-# --- 输出最终结果 ---
 PUBLIC_IP=$(curl -s https://api.ipify.org || echo "YOUR_PUBLIC_IP")
 DECODED_NODES=$(echo "$NODE_INFO" | base64 -d 2>/dev/null || echo "$NODE_INFO")
 echo -e "\n${GREEN}========================================${NC}"
@@ -262,7 +247,7 @@ echo -e "${GREEN}========================================${NC}"
 echo -e "\n${YELLOW}--- 节点订阅信息 ---${NC}"
 echo -e "${BLUE}订阅地址: ${GREEN}http://$PUBLIC_IP:$PORT/$SUB_PATH${NC}"
 echo -e "\n${YELLOW}--- 节点分享链接 ---${NC}"
-echo "$DECODED_NODES"
+echo -e "${GREEN}$DECODED_NODES${NC}"
 SAVE_INFO="
 --- 节点信息备份 @ $(date) ---
 订阅地址: http://$PUBLIC_IP:$PORT/$SUB_PATH
