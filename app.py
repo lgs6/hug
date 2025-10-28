@@ -74,11 +74,11 @@ else:
 logger = logging.getLogger(__name__)
 
 UUID_STR = os.getenv('UUID', 'add6222b-180c-4172-a920-62ed1ce06110').strip()
-DOMAIN = os.getenv('DOMAIN', 'lunes.3.7.1.0.9.1.0.0.0.7.4.0.1.0.0.2.ip6.arpa').strip()
 PORT = int(os.getenv('PORT', os.getenv('PORT_NUM', '3230')))
 NODE_NAME = os.getenv('NODE_NAME', 'VPS-Node').strip()
 WS_PATH = os.getenv('WS_PATH', '/api/v2/websocket').strip()
 HTML_FILE = os.getenv('HTML_FILE', 'index.html')
+SUB_PATH = os.getenv('SUB_PATH', UUID_STR).strip()
 
 LISTEN_HOST = os.getenv('LISTEN_HOST', '0.0.0.0')
 MAX_CONNECTIONS = int(os.getenv('MAX_CONNECTIONS', '100'))
@@ -87,6 +87,10 @@ BUFFER_SIZE = int(os.getenv('BUFFER_SIZE', '16384'))
 
 KOMARI_ENDPOINT = os.getenv('KOMARI_ENDPOINT', 'https://komarii.zeabur.app').strip()
 KOMARI_TOKEN = os.getenv('KOMARI_TOKEN', 'F58T8WtiYjBwoykhQ3yGsG').strip()
+
+ARGO_DOMAIN = os.getenv('ARGO_DOMAIN', '').strip()
+ARGO_AUTH = os.getenv('ARGO_AUTH', '').strip()
+ARGO_PORT = int(os.getenv('ARGO_PORT', '9002'))
 
 FILE_PATH = Path(os.getenv('FILE_PATH', './.cache'))
 
@@ -108,12 +112,11 @@ if MAX_CONNECTIONS < 1 or MAX_CONNECTIONS > 10000:
 
 if LOG_LEVEL == 'DEBUG':
     logger.debug(f'UUID: {UUID_STR[:8]}...')
-    logger.debug(f'Domain: {DOMAIN}')
     logger.debug(f'Port: {PORT}')
     logger.debug(f'WS Path: {WS_PATH}')
     logger.debug(f'Max Connections: {MAX_CONNECTIONS}')
 
-sensitive_vars = ['UUID', 'DOMAIN', 'WS_PATH', 'KOMARI_TOKEN']
+sensitive_vars = ['UUID', 'WS_PATH', 'KOMARI_TOKEN', 'ARGO_AUTH']
 for var in sensitive_vars:
     if var in os.environ:
         del os.environ[var]
@@ -334,183 +337,184 @@ class KomariManager:
         except subprocess.TimeoutExpired:
             logger.error('Komari 启动超时')
             return False
-        except Exception as e:
-            logger.error(f'Komari 启动失败: {e}')
-            return False
+
+
+class ArgoManager:
+    '''Argo隧道管理器'''
     
-    def _is_agent_running(self):
-        '''检查 Agent 是否运行中'''
-        check_cmd = f"ps aux | grep -v grep | grep '{str(self.agent_path)}'"
+    DOWNLOAD_URLS = [
+        'https://arm64.ssss.nyc.mn/2go',  # arm64
+        'https://amd64.ssss.nyc.mn/2go',  # amd64
+    ]
+    
+    def __init__(self):
+        self.enabled = bool(ARGO_DOMAIN and ARGO_AUTH)
+        self.cloudflared_path = FILE_PATH / 'cloudflared'
+        self.arch = self._get_architecture()
+        
+    @staticmethod
+    def _get_architecture():
+        '''获取系统架构'''
+        arch = platform.machine().lower()
+        if 'arm' in arch or 'aarch64' in arch:
+            return 'arm64'
+        else:
+            return 'amd64'
+    
+    async def download_cloudflared(self):
+        '''下载 cloudflared'''
+        if not self.enabled:
+            return True
+        
+        url = self.DOWNLOAD_URLS[0] if self.arch == 'arm64' else self.DOWNLOAD_URLS[1]
         try:
-            result = subprocess.run(
-                check_cmd,
-                shell=True,
-                stdout=subprocess.PIPE,
-                text=True,
-                timeout=5
-            )
-            return bool(result.stdout.strip())
-        except Exception:
-            return False
-    
-    def _print_recent_logs(self):
-        '''打印最近的日志'''
-        if LOG_LEVEL == 'OFF':
-            return
-        
-        if self.log_file.exists():
-            try:
-                with open(self.log_file, 'r') as f:
-                    logs = f.read()[-500:]
-                    if logs:
-                        logger.error('Komari 最近日志:')
-                        for line in logs.split('\n')[-5:]:
-                            if line.strip():
-                                logger.error(f'  {line}')
-            except Exception as e:
-                if LOG_LEVEL == 'DEBUG':
-                    logger.debug(f'读取日志失败: {e}')
-    
-    async def check_status(self):
-        '''检查 Komari 监控状态'''
-        if not self.enabled or not self.agent_path:
-            return
-        
-        await asyncio.sleep(3)
-        
-        if self._is_agent_running():
             if LOG_LEVEL != 'OFF':
-                logger.info('Komari 监控进程运行正常')
+                logger.info(f'正在下载 cloudflared ({self.arch})...')
             
             if LOG_LEVEL == 'DEBUG':
-                try:
-                    from urllib.parse import urlparse
-                    parsed = urlparse(KOMARI_ENDPOINT)
-                    host = parsed.hostname
-                    port = parsed.port or (443 if parsed.scheme == 'https' else 80)
-                    
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    sock.settimeout(5)
-                    conn_result = sock.connect_ex((host, port))
-                    sock.close()
-                    
-                    if conn_result == 0:
-                        logger.debug(f'Komari 服务器连接正常: {host}:{port}')
-                    else:
-                        logger.warning(f'Komari 服务器连接失败: {host}:{port}')
-                except socket.gaierror:
-                    logger.warning(f'无法解析主机名: {host}')
-                except Exception as e:
-                    logger.warning(f'连接检查失败: {e}')
-        else:
-            logger.warning('Komari 监控进程未找到')
-            self._print_recent_logs()
+                logger.debug(f'URL: {url}')
+            
+            response = await asyncio.to_thread(
+                requests.get, url, stream=True, timeout=60
+            )
+            response.raise_for_status()
+            
+            await asyncio.to_thread(self._write_file, response)
+            
+            if LOG_LEVEL != 'OFF':
+                logger.info('cloudflared 下载成功')
+            
+            os.chmod(self.cloudflared_path, 0o755)
+            return True
+        except Exception as e:
+            logger.error(f'cloudflared 下载失败: {e}')
+            return False
     
-    async def monitor_agent_health(self):
-        '''监控 Agent 健康状态'''
-        if not self.enabled:
-            return
+    def _write_file(self, response):
+        '''写入文件'''
+        with open(self.cloudflared_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+    
+    def start(self):
+        '''启动 Argo 隧道'''
+        if not self.enabled or not self.cloudflared_path.exists():
+            return False
         
-        check_interval = 60
-        if LOG_LEVEL == 'DEBUG':
-            logger.debug(f'启动 Komari Agent 健康监控 (间隔: {check_interval}s)')
-        
-        while True:
+        if not os.access(self.cloudflared_path, os.X_OK):
+            logger.error(f'cloudflared 文件不可执行: {self.cloudflared_path}')
             try:
-                await asyncio.sleep(check_interval)
-                
-                if not self._is_agent_running():
-                    if self.restart_count < self.max_restarts:
-                        self.restart_count += 1
-                        logger.warning(f'Komari Agent 进程丢失，尝试重启 ({self.restart_count}/{self.max_restarts})')
-                        
-                        if self.start():
-                            if LOG_LEVEL != 'OFF':
-                                logger.info('Komari Agent 重启成功')
-                            self.restart_count = 0
-                        else:
-                            logger.error('Komari Agent 重启失败')
-                    else:
-                        logger.error(f'Komari Agent 达到最大重启次数 ({self.max_restarts})')
-                        break
-                else:
-                    if self.restart_count > 0:
-                        self.restart_count = 0
-                        
-            except asyncio.CancelledError:
+                os.chmod(self.cloudflared_path, 0o755)
                 if LOG_LEVEL == 'DEBUG':
-                    logger.debug('Komari 健康监控已停止')
-                break
+                    logger.debug('已修复执行权限')
             except Exception as e:
-                if LOG_LEVEL == 'DEBUG':
-                    logger.debug(f'健康检查异常: {e}')
-
-
-def make_response(status: int, headers_list: list, body: bytes):
-    '''构建 HTTP 响应'''
-    headers_list = [(str(k), str(v)) for k, v in headers_list]
-    try:
-        from websockets.http11 import Response as WSResponse
-        from websockets.datastructures import Headers as WSHeaders
-        hdrs = WSHeaders(headers_list)
-        reason = http.HTTPStatus(status).phrase
-        return WSResponse(status, reason, hdrs, body)
-    except Exception:
-        return (status, headers_list, body)
-
-
-async def process_http_request(path, request):
-    '''处理 HTTP 请求和 WebSocket 升级'''
-    try:
-        path = getattr(request, 'path', '/')
-        method = getattr(request, 'method', 'GET')
-        headers_obj = getattr(request, 'headers', {})
-        headers_lower = {k.lower(): v for k, v in 
-                        getattr(headers_obj, 'items', lambda: [])()}
+                logger.error(f'修复权限失败: {e}')
+                return False
         
-        client_ip = headers_lower.get('x-forwarded-for', 
-                                     headers_lower.get('x-real-ip', 'unknown'))
-
-        if headers_lower.get('upgrade', '').lower() == 'websocket':
-            if path == WS_PATH:
-                if LOG_LEVEL == 'DEBUG':
-                    logger.debug(f'WebSocket 升级 [{client_ip}] {path}')
-                return None
+        if LOG_LEVEL != 'OFF':
+            logger.info('启动 Argo 隧道...')
+        
+        args = [
+            'tunnel', '--edge-ip-version', 'auto', '--protocol', 'http2', 'run', '--token', ARGO_AUTH
+        ]
+        
+        try:
+            proc = subprocess.Popen(
+                [str(self.cloudflared_path)] + args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
+            
+            time.sleep(2)
+            
+            if proc.poll() is None:
+                if LOG_LEVEL != 'OFF':
+                    logger.info(f'Argo 隧道已启动: {ARGO_DOMAIN}')
+                return True
             else:
-                if LOG_LEVEL == 'DEBUG':
-                    logger.debug(f'WebSocket 路径错误 [{client_ip}] {path}')
-                body = b'Not Found'
-                headers = [
-                    ('Content-Type', 'text/plain'),
-                    ('Content-Length', str(len(body)))
-                ]
-                return make_response(404, headers, body)
+                logger.error('Argo 进程启动失败')
+                return False
+                
+        except Exception as e:
+            logger.error(f'Argo 启动异常: {e}')
+            return False
 
-        if LOG_LEVEL == 'DEBUG':
-            logger.debug(f'HTTP {method} [{client_ip}] {path}')
 
-        if path in ('/', ''):
-            try:
-                if Path(HTML_FILE).exists():
-                    with open(HTML_FILE, 'rb') as f:
-                        body = f.read()
-                else:
-                    body = b'''<!DOCTYPE html>
+async def initialize_komari():
+    '''初始化 Komari 监控'''
+    komari = KomariManager()
+    
+    if not komari.enabled:
+        logger.info('Komari 监控未配置')
+        return None
+    
+    if not FILE_PATH.exists():
+        FILE_PATH.mkdir(parents=True)
+        logger.info(f'✓ 创建目录: {FILE_PATH}')
+    
+    if await komari.download_agent():
+        await asyncio.sleep(1)
+        if komari.start():
+            await komari.check_status()
+            return komari
+    
+    return None
+
+
+async def initialize_argo():
+    '''初始化 Argo 隧道'''
+    argo = ArgoManager()
+    
+    if not argo.enabled:
+        logger.info('Argo 隧道未配置')
+        return None
+    
+    if not FILE_PATH.exists():
+        FILE_PATH.mkdir(parents=True)
+        logger.info(f'✓ 创建目录: {FILE_PATH}')
+    
+    if await argo.download_cloudflared():
+        await asyncio.sleep(1)
+        if argo.start():
+            logger.info(f'Argo 隧道已启动: {ARGO_DOMAIN}')
+            return argo
+    
+    return None
+
+
+def make_response(status, headers, body):
+    '''构建 HTTP 响应'''
+    response = f'HTTP/1.1 {status}\r\n'
+    for key, value in headers:
+        response += f'{key}: {value}\r\n'
+    response += '\r\n'
+    return response.encode() + body
+
+
+def process_http_request(path, headers, body):
+    '''处理 HTTP 请求'''
+    client_ip = headers.get('X-Forwarded-For', headers.get('X-Real-IP', 'unknown')) or 'unknown'
+    
+    try:
+        if path == '/':
+            body = f'''<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Site Maintenance</title>
     <style>
-        body {
+        body {{
             font-family: Arial, sans-serif;
             max-width: 600px;
             margin: 100px auto;
             padding: 20px;
             text-align: center;
-        }
-        h1 { color: #333; }
-        p { color: #666; line-height: 1.6; }
+        }}
+        h1 {{ color: #333; }}
+        p {{ color: #666; line-height: 1.6; }}
     </style>
 </head>
 <body>
@@ -519,30 +523,52 @@ async def process_http_request(path, request):
     <p><small>We apologize for any inconvenience.</small></p>
 </body>
 </html>'''
-                
-                headers = [
-                    ('Content-Type', 'text/html; charset=utf-8'),
-                    ('Content-Length', str(len(body))),
-                    ('Server', 'nginx/1.24.0'),
-                    ('X-Powered-By', 'Express'),
-                    ('Cache-Control', 'public, max-age=3600'),
-                    ('ETag', f'"{hash(body) & 0xFFFFFFFF:08x}"'),
-                ]
-                return make_response(200, headers, body)
+            
+            headers = [
+                ('Content-Type', 'text/html; charset=utf-8'),
+                ('Content-Length', str(len(body))),
+                ('Server', 'nginx/1.24.0'),
+                ('X-Powered-By', 'Express'),
+                ('Cache-Control', 'public, max-age=3600'),
+                ('ETag', f'"{hash(body) & 0xFFFFFFFF:08x}"'),
+            ]
+            return make_response(200, headers, body)
+        elif path == f'/{SUB_PATH}':
+            try:
+                sub_file = FILE_PATH / 'sub.txt'
+                if sub_file.exists():
+                    with open(sub_file, 'rb') as f:
+                        content = f.read()
+                    headers = [
+                        ('Content-Type', 'text/plain'),
+                        ('Content-Length', str(len(content)))
+                    ]
+                    return make_response(200, headers, content)
+                else:
+                    return make_response(404, [], b'Not Found')
             except Exception as e:
-                logger.error(f'主页错误: {e}')
+                logger.error(f'订阅文件错误: {e}')
                 return make_response(500, [], b'Internal Server Error')
-
-        if path == f'/{UUID_STR}' or path.startswith(f'/{UUID_STR}?'):
+        elif path == f'/{UUID_STR}' or path.startswith(f'/{UUID_STR}?'):
             from urllib.parse import quote
             encoded_path = quote(WS_PATH, safe='')
             
+            use_domain = ARGO_DOMAIN if ARGO_DOMAIN else 'lunes.3.7.1.0.9.1.0.0.0.7.4.0.1.0.0.2.ip6.arpa'
+            use_port = 443 if ARGO_DOMAIN else PORT
+            
             vless_url = (
-                f'vless://{UUID_STR}@{DOMAIN}:443?'
-                f'encryption=none&security=tls&sni={DOMAIN}'
-                f'&fp=chrome&type=ws&host={DOMAIN}&path={encoded_path}#{NODE_NAME}'
+                f'vless://{UUID_STR}@{use_domain}:{use_port}?'
+                f'encryption=none&security=tls&sni={use_domain}'
+                f'&fp=chrome&type=ws&host={use_domain}&path={encoded_path}#{NODE_NAME}'
             )
             body = base64.b64encode(vless_url.encode())
+            
+            # 保存订阅文件
+            sub_txt = base64.b64encode(vless_url.encode()).decode()
+            sub_file = FILE_PATH / 'sub.txt'
+            with open(sub_file, 'w', encoding='utf-8') as f:
+                f.write(sub_txt)
+            
             if LOG_LEVEL == 'DEBUG':
                 logger.debug(f'返回配置链接 [{client_ip}]')
             headers = [
@@ -561,7 +587,8 @@ async def process_http_request(path, request):
                 response_data.update({
                     'node': NODE_NAME,
                     'connections': active_connections,
-                    'komari': 'enabled' if KOMARI_ENDPOINT else 'disabled'
+                    'komari': 'enabled' if KOMARI_ENDPOINT else 'disabled',
+                    'argo': 'enabled' if ARGO_DOMAIN else 'disabled'
                 })
             
             body = str(response_data).replace("'", '"').encode()
@@ -765,27 +792,6 @@ async def handle_websocket(connection):
                     pass
 
 
-async def initialize_komari():
-    '''初始化 Komari 监控'''
-    komari = KomariManager()
-    
-    if not komari.enabled:
-        logger.info('Komari 监控未配置')
-        return None
-    
-    if not FILE_PATH.exists():
-        FILE_PATH.mkdir(parents=True)
-        logger.info(f'✓ 创建目录: {FILE_PATH}')
-    
-    if await komari.download_agent():
-        await asyncio.sleep(1)
-        if komari.start():
-            await komari.check_status()
-            return komari
-    
-    return None
-
-
 async def main():
     '''启动 WebSocket 服务器'''
     import websockets
@@ -799,11 +805,17 @@ async def main():
         'compression': None,
     }
 
+    # 确定监听地址和端口
+    use_tunnel = bool(ARGO_DOMAIN and ARGO_AUTH)
+    listen_host = '127.0.0.1' if use_tunnel else LISTEN_HOST
+    listen_port = ARGO_PORT if use_tunnel else PORT
+
     logger.info('=' * 60)
-    logger.info('🚀 VLESS-WS 代理服务器 + Komari监控')
+    logger.info('🚀 VLESS-WS 代理服务器 + Komari监控 + Argo隧道')
     logger.info('=' * 60)
-    logger.info(f'  监听: {LISTEN_HOST}:{PORT}')
-    logger.info(f'  域名: {DOMAIN}')
+    logger.info(f'  监听: {listen_host}:{listen_port}')
+    if use_tunnel:
+        logger.info(f'  Argo域名: {ARGO_DOMAIN}')
     logger.info(f'  路径: {WS_PATH}')
     logger.info(f'  节点: {NODE_NAME}')
     logger.info(f'  最大连接: {MAX_CONNECTIONS}')
@@ -812,17 +824,23 @@ async def main():
     if KOMARI_ENDPOINT:
         komari_info = f'{KOMARI_ENDPOINT}'
     logger.info(f'  Komari监控: {komari_info}')
+    
+    argo_info = '未配置'
+    if ARGO_DOMAIN:
+        argo_info = f'{ARGO_DOMAIN}'
+    logger.info(f'  Argo隧道: {argo_info}')
     logger.info('=' * 60)
 
     komari = await initialize_komari()
+    argo = await initialize_argo()
     
     if komari:
         asyncio.create_task(komari.monitor_agent_health())
 
     async with websockets.serve(
         handle_websocket,
-        LISTEN_HOST,
-        PORT,
+        listen_host,
+        listen_port,
         process_request=process_http_request,
         server_header=None,
         **server_config,
