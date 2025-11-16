@@ -1,796 +1,617 @@
 import os
-import sys
+import re
+import json
 import time
 import base64
-import uuid
-import socket
-import http
+import shutil
 import asyncio
-import logging
-import threading
+import requests
 import platform
 import subprocess
-import requests
-from pathlib import Path
-from websockets.connection import State
+import threading
+from threading import Thread
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
+UPLOAD_URL = os.environ.get('UPLOAD_URL', '')
+PROJECT_URL = os.environ.get('PROJECT_URL', '')
+AUTO_ACCESS = os.environ.get('AUTO_ACCESS', 'false').lower() == 'true'
+FILE_PATH = os.environ.get('FILE_PATH', './.cache')
+SUB_PATH = os.environ.get('SUB_PATH', '')
+UUID = os.environ.get('UUID', '')
+ARGO_DOMAIN = os.environ.get('ARGO_DOMAIN', '')
+ARGO_AUTH = os.environ.get('ARGO_AUTH', '')
+ARGO_PORT = int(os.environ.get('ARGO_PORT', '8001'))
+CFIP = os.environ.get('CFIP', 'www.visa.com.tw')
+CFPORT = int(os.environ.get('CFPORT', '443'))
+NAME = os.environ.get('NAME', 'Vls')
+CHAT_ID = os.environ.get('CHAT_ID', '')
+BOT_TOKEN = os.environ.get('BOT_TOKEN', '')
+PORT = int(os.environ.get('SERVER_PORT') or os.environ.get('PORT') or 3000)
 
-def load_env_file(env_file='.env'):
-    '''加载 .env 文件中的环境变量'''
-    env_path = Path(env_file)
-    if not env_path.exists():
+def create_directory():
+    print('\033c', end='')
+    if not os.path.exists(FILE_PATH):
+        os.makedirs(FILE_PATH)
+        print(f"{FILE_PATH} is created")
+    else:
+        print(f"{FILE_PATH} already exists")
+
+web_path = os.path.join(FILE_PATH, 'web')
+bot_path = os.path.join(FILE_PATH, 'bot')
+sub_path = os.path.join(FILE_PATH, 'sub.txt')
+list_path = os.path.join(FILE_PATH, 'list.txt')
+boot_log_path = os.path.join(FILE_PATH, 'boot.log')
+config_path = os.path.join(FILE_PATH, 'config.json')
+
+def delete_nodes():
+    try:
+        if not UPLOAD_URL:
+            return
+
+        if not os.path.exists(sub_path):
+            return
+
+        try:
+            with open(sub_path, 'r') as file:
+                file_content = file.read()
+        except:
+            return None
+
+        decoded = base64.b64decode(file_content).decode('utf-8')
+        nodes = [line for line in decoded.split('\n') if any(protocol in line for protocol in ['vless://', 'vmess://', 'trojan://', 'hysteria2://', 'tuic://'])]
+
+        if not nodes:
+            return
+
+        try:
+            requests.post(f"{UPLOAD_URL}/api/delete-nodes", 
+                          data=json.dumps({"nodes": nodes}),
+                          headers={"Content-Type": "application/json"})
+        except:
+            return None
+    except Exception as e:
+        print(f"Error in delete_nodes: {e}")
+        return None
+
+def cleanup_old_files():
+    paths_to_delete = ['web', 'bot', 'boot.log', 'list.txt']
+    for file in paths_to_delete:
+        file_path = os.path.join(FILE_PATH, file)
+        try:
+            if os.path.exists(file_path):
+                if os.path.isdir(file_path):
+                    shutil.rmtree(file_path)
+                else:
+                    os.remove(file_path)
+        except Exception as e:
+            print(f"Error removing {file_path}: {e}")
+
+class RequestHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            self.wfile.write(b'Hello World')
+            
+        elif self.path == f'/{SUB_PATH}':
+            try:
+                with open(sub_path, 'rb') as f:
+                    content = f.read()
+                self.send_response(200)
+                self.send_header('Content-type', 'text/plain')
+                self.end_headers()
+                self.wfile.write(content)
+            except:
+                self.send_response(404)
+                self.end_headers()
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        pass
+    
+def get_system_architecture():
+    architecture = platform.machine().lower()
+    if 'arm' in architecture or 'aarch64' in architecture:
+        return 'arm'
+    else:
+        return 'amd'
+
+def download_file(file_name, file_url):
+    file_path = os.path.join(FILE_PATH, file_name)
+    try:
+        response = requests.get(file_url, stream=True)
+        response.raise_for_status()
+        
+        with open(file_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        
+        print(f"Download {file_name} successfully")
+        return True
+    except Exception as e:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        print(f"Download {file_name} failed: {e}")
+        return False
+
+def get_files_for_architecture(architecture):
+    if architecture == 'arm':
+        base_files = [
+            {"fileName": "web", "fileUrl": "https://arm64.ssss.nyc.mn/web"},
+            {"fileName": "bot", "fileUrl": "https://arm64.ssss.nyc.mn/2go"}
+        ]
+    else:
+        base_files = [
+            {"fileName": "web", "fileUrl": "https://amd64.ssss.nyc.mn/web"},
+            {"fileName": "bot", "fileUrl": "https://amd64.ssss.nyc.mn/2go"}
+        ]
+
+    return base_files
+
+def authorize_files(file_paths):
+    for relative_file_path in file_paths:
+        absolute_file_path = os.path.join(FILE_PATH, relative_file_path)
+        if os.path.exists(absolute_file_path):
+            try:
+                os.chmod(absolute_file_path, 0o775)
+                print(f"Empowerment success for {absolute_file_path}: 775")
+            except Exception as e:
+                print(f"Empowerment failed for {absolute_file_path}: {e}")
+
+def argo_type():
+    if not ARGO_AUTH or not ARGO_DOMAIN:
+        print("ARGO_DOMAIN or ARGO_AUTH variable is empty, use quick tunnels")
+        return
+
+    if "TunnelSecret" in ARGO_AUTH:
+        with open(os.path.join(FILE_PATH, 'tunnel.json'), 'w') as f:
+            f.write(ARGO_AUTH)
+        
+        tunnel_id = ARGO_AUTH.split('"')[11]
+        tunnel_yml = f"""
+tunnel: {tunnel_id}
+credentials-file: {os.path.join(FILE_PATH, 'tunnel.json')}
+protocol: http2
+
+ingress:
+  - hostname: {ARGO_DOMAIN}
+    service: http://localhost:{ARGO_PORT}
+    originRequest:
+      noTLSVerify: true
+  - service: http_status:404
+"""
+        with open(os.path.join(FILE_PATH, 'tunnel.yml'), 'w') as f:
+            f.write(tunnel_yml)
+    else:
+        print("Use token connect to tunnel,please set the {ARGO_PORT} in cloudflare")
+
+def exec_cmd(command):
+    try:
+        process = subprocess.Popen(
+            command, 
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        stdout, stderr = process.communicate()
+        return stdout + stderr
+    except Exception as e:
+        print(f"Error executing command: {e}")
+        return str(e)
+
+async def download_files_and_run():
+    global private_key, public_key
+    
+    architecture = get_system_architecture()
+    files_to_download = get_files_for_architecture(architecture)
+    
+    if not files_to_download:
+        print("Can't find a file for the current architecture")
+        return
+    
+    download_success = True
+    for file_info in files_to_download:
+        if not download_file(file_info["fileName"], file_info["fileUrl"]):
+            download_success = False
+    
+    if not download_success:
+        print("Error downloading files")
+        return
+    
+    files_to_authorize = ['web', 'bot']
+    authorize_files(files_to_authorize)
+    
+    # 核心配置：
+    # 1. 添加了 "dns" 块 (上次的修改)
+    # 2. 在 "outbounds" 的 "freedom" 协议中添加了 "domainStrategy": "UseIP" (本次的关键修正)
+    config = {
+        "log": {
+            "access": "/dev/null",
+            "error": "/dev/null",
+            "loglevel": "none"
+        },
+        "dns": {
+            "servers": [
+                "8.8.8.8",
+                "1.1.1.1",
+                "localhost"
+            ]
+        },
+        "inbounds": [
+            {
+                "port": ARGO_PORT,
+                "protocol": "vless",
+                "settings": {
+                    "clients": [
+                        {
+                            "id": UUID,
+                            "flow": "xtls-rprx-vision"
+                        }
+                    ],
+                    "decryption": "none",
+                    "fallbacks": [
+                        {"dest": 3001},
+                        {"path": "/vless-argo", "dest": 3002},
+                        {"path": "/vmess-argo", "dest": 3003},
+                        {"path": "/trojan-argo", "dest": 3004}
+                    ]
+                },
+                "streamSettings": {
+                    "network": "tcp"
+                }
+            },
+            {
+                "port": 3001,
+                "listen": "127.0.0.1",
+                "protocol": "vless",
+                "settings": {
+                    "clients": [
+                        {
+                            "id": UUID
+                        }
+                    ],
+                    "decryption": "none"
+                },
+                "streamSettings": {
+                    "network": "ws",
+                    "security": "none"
+                }
+            },
+            {
+                "port": 3002,
+                "listen": "127.0.0.1",
+                "protocol": "vless",
+                "settings": {
+                    "clients": [
+                        {
+                            "id": UUID,
+                            "level": 0
+                        }
+                    ],
+                    "decryption": "none"
+                },
+                "streamSettings": {
+                    "network": "ws",
+                    "security": "none",
+                    "wsSettings": {
+                        "path": "/vless-argo"
+                    }
+                },
+                "sniffing": {
+                    "enabled": True,
+                    "destOverride": ["http", "tls", "quic"],
+                    "metadataOnly": False
+                }
+            },
+            {
+                "port": 3003,
+                "listen": "127.0.0.1",
+                "protocol": "vmess",
+                "settings": {
+                    "clients": [
+                        {
+                            "id": UUID,
+                            "alterId": 0
+                        }
+                    ]
+                },
+                "streamSettings": {
+                    "network": "ws",
+                    "wsSettings": {
+                        "path": "/vmess-argo"
+                    }
+                },
+                "sniffing": {
+                    "enabled": True,
+                    "destOverride": ["http", "tls", "quic"],
+                    "metadataOnly": False
+                }
+            },
+            {
+                "port": 3004,
+                "listen": "127.0.0.1",
+                "protocol": "trojan",
+                "settings": {
+                    "clients": [
+                        {
+                            "password": UUID
+                        }
+                    ]
+                },
+                "streamSettings": {
+                    "network": "ws",
+                    "security": "none",
+                    "wsSettings": {
+                        "path": "/trojan-argo"
+                    }
+                },
+                "sniffing": {
+                    "enabled": True,
+                    "destOverride": ["http", "tls", "quic"],
+                    "metadataOnly": False
+                }
+            }
+        ],
+        "outbounds": [
+            {
+                "protocol": "freedom",
+                "tag": "direct",
+                # VVVV 这就是本次的关键修正 VVVV
+                "settings": {
+                    "domainStrategy": "UseIP"
+                }
+                # ^^^^ 修正结束 ^^^^
+            },
+            {
+                "protocol": "blackhole",
+                "tag": "block"
+            }
+        ]
+    }
+
+    with open(os.path.join(FILE_PATH, 'config.json'), 'w', encoding='utf-8') as config_file:
+        json.dump(config, config_file, ensure_ascii=False, indent=2)
+    
+    command = f"nohup {os.path.join(FILE_PATH, 'web')} -c {os.path.join(FILE_PATH, 'config.json')} >/dev/null 2>&1 &"
+    try:
+        exec_cmd(command)
+        print('web is running')
+        time.sleep(1)
+    except Exception as e:
+        print(f"web running error: {e}")
+    
+    if os.path.exists(os.path.join(FILE_PATH, 'bot')):
+        if re.match(r'^[A-Z0-9a-z=]{120,250}$', ARGO_AUTH):
+            args = f"tunnel --edge-ip-version auto --no-autoupdate --protocol http2 run --token {ARGO_AUTH}"
+        elif "TunnelSecret" in ARGO_AUTH:
+            args = f"tunnel --edge-ip-version auto --config {os.path.join(FILE_PATH, 'tunnel.yml')} run"
+        else:
+            args = f"tunnel --edge-ip-version auto --no-autoupdate --protocol http2 --logfile {os.path.join(FILE_PATH, 'boot.log')} --loglevel info --url http://localhost:{ARGO_PORT}"
+        
+        try:
+            exec_cmd(f"nohup {os.path.join(FILE_PATH, 'bot')} {args} >/dev/null 2>&1 &")
+            print('bot is running')
+            time.sleep(2)
+        except Exception as e:
+            print(f"Error executing command: {e}")
+    
+    time.sleep(5)
+    
+    await extract_domains()
+
+async def extract_domains():
+    argo_domain = None
+
+    if ARGO_AUTH and ARGO_DOMAIN:
+        argo_domain = ARGO_DOMAIN
+        print(f'ARGO_DOMAIN: {argo_domain}')
+        await generate_links(argo_domain)
+    else:
+        try:
+            with open(boot_log_path, 'r') as f:
+                file_content = f.read()
+            
+            lines = file_content.split('\n')
+            argo_domains = []
+            
+            for line in lines:
+                domain_match = re.search(r'https?://([^ ]*trycloudflare\.com)/?', line)
+                if domain_match:
+                    domain = domain_match.group(1)
+                    argo_domains.append(domain)
+            
+            if argo_domains:
+                argo_domain = argo_domains[0]
+                print(f'ArgoDomain: {argo_domain}')
+                await generate_links(argo_domain)
+            else:
+                print('ArgoDomain not found, re-running bot to obtain ArgoDomain')
+                if os.path.exists(boot_log_path):
+                    os.remove(boot_log_path)
+                
+                try:
+                    exec_cmd('pkill -f "[b]ot" > /dev/null 2>&1')
+                except:
+                    pass
+                
+                time.sleep(1)
+                args = f'tunnel --edge-ip-version auto --no-autoupdate --protocol http2 --logfile {FILE_PATH}/boot.log --loglevel info --url http://localhost:{ARGO_PORT}'
+                exec_cmd(f'nohup {os.path.join(FILE_PATH, "bot")} {args} >/dev/null 2>&1 &')
+                print('bot is running.')
+                time.sleep(6)
+                await extract_domains()
+        except Exception as e:
+            print(f'Error reading boot.log: {e}')
+
+def upload_nodes():
+    if UPLOAD_URL and PROJECT_URL:
+        subscription_url = f"{PROJECT_URL}/{SUB_PATH}"
+        json_data = {
+            "subscription": [subscription_url]
+        }
+        
+        try:
+            response = requests.post(
+                f"{UPLOAD_URL}/api/add-subscriptions",
+                json=json_data,
+                headers={"Content-Type": "application/json"}
+            )
+            
+            if response.status_code == 200:
+                print('Subscription uploaded successfully')
+        except Exception as e:
+            pass
+    
+    elif UPLOAD_URL:
+        if not os.path.exists(list_path):
+            return
+        
+        with open(list_path, 'r') as f:
+            content = f.read()
+        
+        nodes = [line for line in content.split('\n') if any(protocol in line for protocol in ['vless://', 'vmess://', 'trojan://', 'hysteria2://', 'tuic://'])]
+        
+        if not nodes:
+            return
+        
+        json_data = json.dumps({"nodes": nodes})
+        
+        try:
+            response = requests.post(
+                f"{UPLOAD_URL}/api/add-nodes",
+                data=json_data,
+                headers={"Content-Type": "application/json"}
+            )
+            
+            if response.status_code == 200:
+                print('Nodes uploaded successfully')
+        except:
+            return None
+    else:
+        return
+    
+def send_telegram():
+    if not BOT_TOKEN or not CHAT_ID:
         return
     
     try:
-        with open(env_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                if '=' in line:
-                    key, value = line.split('=', 1)
-                    key = key.strip()
-                    value = value.strip()
-                    if (value.startswith('"') and value.endswith('"')) or \
-                       (value.startswith("'") and value.endswith("'")):
-                        value = value[1:-1]
-                    if key not in os.environ:
-                        os.environ[key] = value
+        with open(sub_path, 'r') as f:
+            message = f.read()
+        
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        
+        escaped_name = re.sub(r'([_*\[\]()~>#+=|{}.!\-])', r'\\\1', NAME)
+        
+        params = {
+            "chat_id": CHAT_ID,
+            "text": f"**{escaped_name}节点推送通知**\n{message}",
+            "parse_mode": "MarkdownV2"
+        }
+        
+        requests.post(url, params=params)
+        print('Telegram message sent successfully')
     except Exception as e:
-        print(f'[ERROR] 加载 .env 失败: {e}', file=sys.stderr)
+        print(f'Failed to send Telegram message: {e}')
 
+async def generate_links(argo_domain):
+    meta_info = subprocess.run(['curl', '-s', 'https://speed.cloudflare.com/meta'], capture_output=True, text=True)
+    meta_info = meta_info.stdout.split('"')
+    ISP = f"{meta_info[25]}-{meta_info[17]}".replace(' ', '_').strip()
 
-load_env_file()
+    time.sleep(2)
+    VMESS = {"v": "2", "ps": f"{NAME}-{ISP}", "add": CFIP, "port": CFPORT, "id": UUID, "aid": "0", "scy": "none", "net": "ws", "type": "none", "host": argo_domain, "path": "/vmess-argo?ed=2560", "tls": "tls", "sni": argo_domain, "alpn": "", "fp": "chrome"}
+ 
+    list_txt = f"""
+vless://{UUID}@{CFIP}:{CFPORT}?encryption=none&security=tls&sni={argo_domain}&fp=chrome&type=ws&host={argo_domain}&path=%2Fvless-argo%3Fed%3D2560#{NAME}-{ISP}
+  
+vmess://{ base64.b64encode(json.dumps(VMESS).encode('utf-8')).decode('utf-8')}
 
-LOG_LEVEL = os.getenv('LOG_LEVEL', 'OFF').upper()
-
-LOG_LEVEL_MAP = {
-    'OFF': logging.CRITICAL + 10,
-    'INFO': logging.INFO,
-    'DEBUG': logging.DEBUG,
-}
-
-log_level = LOG_LEVEL_MAP.get(LOG_LEVEL, logging.INFO)
-
-if LOG_LEVEL != 'OFF':
-    handler = logging.StreamHandler(sys.stdout)
+trojan://{UUID}@{CFIP}:{CFPORT}?security=tls&sni={argo_domain}&fp=chrome&type=ws&host={argo_domain}&path=%2Ftrojan-argo%3Fed%3D2560#{NAME}-{ISP}
+    """
     
-    # 修复：使用 logging.Formatter 替换不存在的 ColoredFormatter
-    if LOG_LEVEL == 'DEBUG':
-        formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S')
-    else:
-        # 修复：使用 logging.Formatter 替换不存在的 ColoredFormatter
-        formatter = logging.Formatter('%(message)s')
-    
-    handler.setFormatter(formatter)
-    
-    logging.basicConfig(
-        level=log_level,
-        handlers=[handler]
-    )
-else:
-    logging.disable(logging.CRITICAL)
+    with open(os.path.join(FILE_PATH, 'list.txt'), 'w', encoding='utf-8') as list_file:
+        list_file.write(list_txt)
 
-logger = logging.getLogger(__name__)
-
-UUID_STR = os.getenv('UUID', 'add6222b-180c-4172-a920-62ed1ce06110').strip()
-DOMAIN = os.getenv('DOMAIN', 'lunes.3.7.1.0.9.1.0.0.0.7.4.0.1.0.0.2.ip6.arpa').strip()
-PORT = int(os.getenv('PORT', os.getenv('PORT_NUM', '3230')))
-NODE_NAME = os.getenv('NODE_NAME', 'VPS-Node').strip()
-WS_PATH = os.getenv('WS_PATH', '/api/v2/websocket').strip()
-HTML_FILE = os.getenv('HTML_FILE', 'index.html')
-
-LISTEN_HOST = os.getenv('LISTEN_HOST', '0.0.0.0')
-MAX_CONNECTIONS = int(os.getenv('MAX_CONNECTIONS', '100'))
-ENABLE_UVLOOP = os.getenv('ENABLE_UVLOOP', 'true').lower() in ('true', '1', 'yes')
-BUFFER_SIZE = int(os.getenv('BUFFER_SIZE', '16384'))
-
-KOMARI_ENDPOINT = os.getenv('KOMARI_ENDPOINT', 'https://komarii.zeabur.app').strip()
-KOMARI_TOKEN = os.getenv('KOMARI_TOKEN', 'F58T8WtiYjBwoykhQ3yGsG').strip()
-
-FILE_PATH = Path(os.getenv('FILE_PATH', './.cache'))
-
-if not UUID_STR:
-    logger.error('UUID 未设置')
-    sys.exit(1)
-
-if not (1024 <= PORT <= 65535):
-    logger.error(f'端口号无效: {PORT}')
-    sys.exit(1)
-
-if not WS_PATH.startswith('/'):
-    logger.error(f'WebSocket 路径必须以 / 开头: {WS_PATH}')
-    sys.exit(1)
-
-if MAX_CONNECTIONS < 1 or MAX_CONNECTIONS > 10000:
-    logger.error(f'最大连接数无效: {MAX_CONNECTIONS}')
-    sys.exit(1)
-
-if LOG_LEVEL == 'DEBUG':
-    logger.debug(f'UUID: {UUID_STR[:8]}...')
-    logger.debug(f'Domain: {DOMAIN}')
-    logger.debug(f'Port: {PORT}')
-    logger.debug(f'WS Path: {WS_PATH}')
-    logger.debug(f'Max Connections: {MAX_CONNECTIONS}')
-
-sensitive_vars = ['UUID', 'DOMAIN', 'WS_PATH', 'KOMARI_TOKEN']
-for var in sensitive_vars:
-    if var in os.environ:
-        del os.environ[var]
-
-if ENABLE_UVLOOP:
-    try:
-        import uvloop
-        uvloop.install()
-        if LOG_LEVEL == 'DEBUG':
-            logger.debug('uvloop 已启用')
-    except ImportError:
-        if LOG_LEVEL == 'DEBUG':
-            logger.debug('uvloop 未安装，使用标准事件循环')
-    except Exception as e:
-        logger.warning(f'uvloop 启用失败: {e}')
-
-try:
-    UUID_BYTES = uuid.UUID(UUID_STR).bytes
-    if LOG_LEVEL == 'DEBUG':
-        logger.debug('UUID 验证通过')
-except Exception as e:
-    logger.error(f'UUID 格式错误: {e}')
-    sys.exit(1)
-
-CONNECTION_SEMAPHORE = asyncio.Semaphore(MAX_CONNECTIONS)
-connection_count = 0
-active_connections = 0
-connections_lock = threading.Lock()
-
-logging.getLogger('websockets.server').setLevel(logging.CRITICAL)
-logging.getLogger('websockets').setLevel(logging.CRITICAL)
-logging.getLogger('urllib3').setLevel(logging.CRITICAL)
-logging.getLogger('requests').setLevel(logging.CRITICAL)
-
-
-class FilteredStderr:
-    '''过滤 stderr 中的 HEAD 请求和握手错误'''
-    
-    def __init__(self, original_stderr):
-        self.original = original_stderr
-        self.buffer = []
-        self.in_traceback = False
-        self.skip_traceback = False
-    
-    def write(self, text):
-        if 'Traceback (most recent call last):' in text:
-            self.in_traceback = True
-            self.buffer = [text]
-            self.skip_traceback = False
-            return
+    sub_txt = base64.b64encode(list_txt.encode('utf-8')).decode('utf-8')
+    with open(os.path.join(FILE_PATH, 'sub.txt'), 'w', encoding='utf-8') as sub_file:
+        sub_file.write(sub_txt)
         
-        if self.in_traceback:
-            self.buffer.append(text)
-            full_text = ''.join(self.buffer)
-            if any(keyword in full_text for keyword in 
-                   ['HEAD', 'unsupported HTTP method', 'InvalidMessage', 'handshake']):
-                self.skip_traceback = True
-            
-            if text and not text[0].isspace() and len(self.buffer) > 3:
-                if not self.skip_traceback:
-                    for line in self.buffer:
-                        self.original.write(line)
-                self.in_traceback = False
-                self.buffer = []
-                self.skip_traceback = False
-            return
-        
-        if any(keyword in text for keyword in 
-               ['opening handshake failed', 'did not receive a valid HTTP request']):
-            return
-        
-        self.original.write(text)
+    print(sub_txt)
     
-    def flush(self):
-        self.original.flush()
+    print(f"{FILE_PATH}/sub.txt saved successfully")
     
-    def __getattr__(self, name):
-        return getattr(self.original, name)
-
-
-sys.stderr = FilteredStderr(sys.stderr)
-
-
-class KomariManager:
-    '''Komari监控管理器'''
-    
-    DOWNLOAD_URLS = [
-        'https://github.com/komari-monitor/komari-agent/releases/latest/download/komari-agent-linux-{arch}',
-        'https://ghproxy.com/https://github.com/komari-monitor/komari-agent/releases/latest/download/komari-agent-linux-{arch}',
-    ]
-    
-    def __init__(self):
-        self.enabled = bool(KOMARI_ENDPOINT and KOMARI_TOKEN)
-        self.agent_path = FILE_PATH / 'komari-agent'
-        self.log_file = FILE_PATH / 'komari.log'
-        self.arch = self._get_architecture()
-        self.restart_count = 0
-        self.max_restarts = 3
-        
-    @staticmethod
-    def _get_architecture():
-        '''获取系统架构'''
-        arch = platform.machine().lower()
-        if 'arm' in arch or 'aarch64' in arch:
-            return 'arm64'
-        elif 'x86_64' in arch or 'amd64' in arch:
-            return 'amd64'
-        elif 'i386' in arch or 'i686' in arch:
-            return '386'
-        elif 'armv7l' in arch:
-            return 'arm'
-        else:
-            logger.warning(f'未知架构: {arch},默认使用 amd64')
-            return 'amd64'
-
-    async def download_agent(self):
-        '''下载 Komari Agent'''
-        if not self.enabled:
-            return True
-        
-        for i, url_template in enumerate(self.DOWNLOAD_URLS, 1):
-            url = url_template.format(arch=self.arch)
-            try:
-                if LOG_LEVEL != 'OFF':
-                    logger.info(f'正在下载 Komari Agent [{i}/{len(self.DOWNLOAD_URLS)}]...')
-                
-                if LOG_LEVEL == 'DEBUG':
-                    logger.debug(f'URL: {url}')
-                
-                response = await asyncio.to_thread(
-                    requests.get, url, stream=True, timeout=60
-                )
-                response.raise_for_status()
-                
-                await asyncio.to_thread(self._write_file, response)
-                
-                if LOG_LEVEL != 'OFF':
-                    logger.info('Komari Agent 下载成功')
-                
-                os.chmod(self.agent_path, 0o755)
-                return True
-            except requests.exceptions.RequestException as e:
-                logger.warning(f'下载失败 [{i}/{len(self.DOWNLOAD_URLS)}]: {e}')
-                if i < len(self.DOWNLOAD_URLS):
-                    if LOG_LEVEL != 'OFF':
-                        logger.info('尝试备用地址...')
-                continue
-            except Exception as e:
-                logger.error(f'下载异常: {e}')
-                continue
-        
-        logger.error('所有下载地址均失败')
-        return False
-    
-    def _write_file(self, response):
-        '''写入文件'''
-        with open(self.agent_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-    
-    def _cleanup_log_file(self):
-        '''清理日志文件'''
-        try:
-            if self.log_file.exists():
-                size_mb = self.log_file.stat().st_size / (1024 * 1024)
-                if size_mb > 10:
-                    if LOG_LEVEL == 'DEBUG':
-                        logger.debug(f'清理 Komari 日志文件 ({size_mb:.1f}MB)')
-                    open(self.log_file, 'w').close()
-        except Exception as e:
-            if LOG_LEVEL == 'DEBUG':
-                logger.debug(f'日志清理失败: {e}')
-    
-    def start(self):
-        '''启动 Komari 监控'''
-        if not self.enabled or not self.agent_path or not self.agent_path.exists():
-            return False
-        
-        if not os.access(self.agent_path, os.X_OK):
-            logger.error(f'Agent 文件不可执行: {self.agent_path}')
-            try:
-                os.chmod(self.agent_path, 0o755)
-                if LOG_LEVEL == 'DEBUG':
-                    logger.debug('已修复执行权限')
-            except Exception as e:
-                logger.error(f'修复权限失败: {e}')
-                return False
-        
-        if LOG_LEVEL != 'OFF':
-            logger.info('启动 Komari 监控...')
-        
-        self._cleanup_log_file()
-        
-        cmd = f'nohup {self.agent_path} -e "{KOMARI_ENDPOINT}" -t "{KOMARI_TOKEN}" >> {self.log_file} 2>&1 &'
-        
-        try:
-            subprocess.run(
-                cmd, 
-                shell=True, 
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=5
-            )
-            
-            time.sleep(2)
-            
-            if self._is_agent_running():
-                if LOG_LEVEL != 'OFF':
-                    logger.info(f'Komari 监控已启动: {KOMARI_ENDPOINT}')
-                return True
-            else:
-                logger.error('Komari 进程启动失败')
-                self._print_recent_logs()
-                return False
-                
-        except subprocess.TimeoutExpired:
-            logger.error('Komari 启动超时')
-            return False
-        except Exception as e:
-            logger.error(f'Komari 启动异常: {e}')
-            return False
-
-    def _is_agent_running(self):
-        '''检查 agent 是否在运行'''
-        try:
-            output = subprocess.check_output(
-                f"pgrep -f '{self.agent_path}'",
-                shell=True
-            ).strip()
-            return bool(output)
-        except subprocess.CalledProcessError:
-            return False
-        except Exception as e:
-            logger.debug(f'进程检查失败: {e}')
-            return False
-
-    def _print_recent_logs(self):
-        '''打印最近日志'''
-        try:
-            with open(self.log_file, 'r') as f:
-                lines = f.readlines()[-10:]
-                logger.error('最近 Komari 日志:\n' + ''.join(lines))
-        except Exception as e:
-            logger.debug(f'日志读取失败: {e}')
-
-    async def check_status(self):
-        '''检查 Komari 状态'''
-        try:
-            response = await asyncio.to_thread(
-                requests.get,
-                f"{KOMARI_ENDPOINT}/api/status",
-                headers={'Authorization': f'Bearer {KOMARI_TOKEN}'},
-                timeout=10
-            )
-            if response.status_code == 200:
-                logger.info('Komari 状态检查成功')
-            else:
-                logger.warning(f'Komari 状态检查失败: {response.status_code}')
-        except Exception as e:
-            logger.warning(f'Komari 状态检查异常: {e}')
-
-    async def monitor_agent_health(self):
-        '''监控 agent 健康'''
-        while True:
-            if not self._is_agent_running():
-                self.restart_count += 1
-                if self.restart_count > self.max_restarts:
-                    logger.error('Komari 重启次数超过上限')
-                    break
-                logger.warning(f'Komari 进程崩溃，重启尝试 {self.restart_count}/{self.max_restarts}')
-                self.start()
-            await asyncio.sleep(60)
-
-
-class FilteredStderr:
-    '''过滤 stderr 中的 HEAD 请求和握手错误'''
-    
-    def __init__(self, original_stderr):
-        self.original = original_stderr
-        self.buffer = []
-        self.in_traceback = False
-        self.skip_traceback = False
-    
-    def write(self, text):
-        if 'Traceback (most recent call last):' in text:
-            self.in_traceback = True
-            self.buffer = [text]
-            self.skip_traceback = False
-            return
-        
-        if self.in_traceback:
-            self.buffer.append(text)
-            full_text = ''.join(self.buffer)
-            if any(keyword in full_text for keyword in 
-                   ['HEAD', 'unsupported HTTP method', 'InvalidMessage', 'handshake']):
-                self.skip_traceback = True
-            
-            if text and not text[0].isspace() and len(self.buffer) > 3:
-                if not self.skip_traceback:
-                    for line in self.buffer:
-                        self.original.write(line)
-                self.in_traceback = False
-                self.buffer = []
-                self.skip_traceback = False
-            return
-        
-        if any(keyword in text for keyword in 
-               ['opening handshake failed', 'did not receive a valid HTTP request']):
-            return
-        
-        self.original.write(text)
-    
-    def flush(self):
-        self.original.flush()
-    
-    def __getattr__(self, name):
-        return getattr(self.original, name)
-
-
-sys.stderr = FilteredStderr(sys.stderr)
-
-
-def make_response(status, headers, body):
-    '''构建 HTTP 响应'''
-    response = f'HTTP/1.1 {status}\r\n'
-    for key, value in headers:
-        response += f'{key}: {value}\r\n'
-    response += '\r\n'
-    return response.encode() + body
-
-
-def process_http_request(path, headers, body):
-    '''处理 HTTP 请求'''
-    client_ip = headers.get('X-Forwarded-For', headers.get('X-Real-IP', 'unknown')) or 'unknown'
+    upload_nodes()
+  
+    return sub_txt   
+ 
+def add_visit_task():
+    if not AUTO_ACCESS or not PROJECT_URL:
+        print("Skipping adding automatic access task")
+        return
     
     try:
-        if path == '/':
-            body = f'''<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Site Maintenance</title>
-    <style>
-        body {{
-            font-family: Arial, sans-serif;
-            max-width: 600px;
-            margin: 100px auto;
-            padding: 20px;
-            text-align: center;
-        }}
-        h1 {{ color: #333; }}
-        p {{ color: #666; line-height: 1.6; }}
-    </style>
-</head>
-<body>
-    <h1>Scheduled Maintenance</h1>
-    <p>This site is temporarily under maintenance. Please check back later.</p>
-    <p><small>We apologize for any inconvenience.</small></p>
-</body>
-</html>'''
-            
-            headers = [
-                ('Content-Type', 'text/html; charset=utf-8'),
-                ('Content-Length', str(len(body))),
-                ('Server', 'nginx/1.24.0'),
-                ('X-Powered-By', 'Express'),
-                ('Cache-Control', 'public, max-age=3600'),
-                ('ETag', f'"{hash(body) & 0xFFFFFFFF:08x}"'),
-            ]
-            return make_response(200, headers, body.encode())
-
-        if path == f'/{UUID_STR}' or path.startswith(f'/{UUID_STR}?'):
-            from urllib.parse import quote
-            encoded_path = quote(WS_PATH, safe='')
-            vless_url = (
-                f'vless://{UUID_STR}@{DOMAIN}:443?'
-                f'encryption=none&security=tls&sni={DOMAIN}'
-                f'&fp=chrome&type=ws&host={DOMAIN}&path={encoded_path}#{NODE_NAME}'
-            )
-            body = base64.b64encode(vless_url.encode())
-            if LOG_LEVEL == 'DEBUG':
-                logger.debug(f'返回配置链接 [{client_ip}]')
-            headers = [
-                ('Content-Type', 'text/plain'),
-                ('Content-Length', str(len(body)))
-            ]
-            return make_response(200, headers, body)
-
-        if path.startswith('/api/'):
-            response_data = {
-                'status': 'running' if 'status' in path else 'ok',
-                'version': '1.0.0'
-            }
-            
-            if 'status' in path:
-                response_data.update({
-                    'node': NODE_NAME,
-                    'connections': active_connections,
-                    'komari': 'enabled' if KOMARI_ENDPOINT else 'disabled'
-                })
-            
-            body = str(response_data).replace("'", '"').encode()
-            headers = [
-                ('Content-Type', 'application/json'),
-                ('Content-Length', str(len(body))),
-                ('Server', 'nginx/1.24.0'),
-                ('X-API-Version', '1.0.0'),
-                ('Cache-Control', 'no-cache')
-            ]
-            return make_response(200, headers, body)
-
-        body = b'Not Found'
-        headers = [
-            ('Content-Type', 'text/plain'),
-            ('Content-Length', str(len(body)))
-        ]
-        return make_response(404, headers, body)
-
+        response = requests.post(
+            'https://keep.gvrander.eu.org/add-url',
+            json={"url": PROJECT_URL},
+            headers={"Content-Type": "application/json"}
+        )
+        print('automatic access task added successfully')
     except Exception as e:
-        logger.error(f'HTTP 请求处理异常: {e}')
-        body = b'Internal Server Error'
-        headers = [
-            ('Content-Type', 'text/plain'),
-            ('Content-Length', str(len(body)))
-        ]
-        return make_response(500, headers, body)
+        print(f'Failed to add URL: {e}')
 
-
-async def forward_ws_to_remote(websocket, remote_writer, stats, conn_id):
-    '''WebSocket → 远程服务器'''
-    try:
-        async for message in websocket:
-            if remote_writer.is_closing():
-                break
-            if isinstance(message, (bytes, bytearray)):
-                size = len(message)
-                stats['uplink'] += size
-                remote_writer.write(message)
-                await remote_writer.drain()
-    except Exception:
-        pass
-    finally:
-        if remote_writer and not remote_writer.is_closing():
+def clean_files():
+    def _cleanup():
+        time.sleep(90)
+        files_to_delete = [boot_log_path, config_path, list_path, web_path, bot_path]
+        
+        for file in files_to_delete:
             try:
-                remote_writer.close()
-            except Exception:
+                if os.path.exists(file):
+                    if os.path.isdir(file):
+                        shutil.rmtree(file)
+                    else:
+                        os.remove(file)
+            except:
                 pass
-
-
-async def forward_remote_to_ws(remote_reader, websocket, stats, conn_id):
-    '''远程服务器 → WebSocket'''
-    try:
-        while True:
-            data = await remote_reader.read(BUFFER_SIZE)
-            if not data or websocket.state != State.OPEN:
-                break
-            stats['downlink'] += len(data)
-            await websocket.send(data)
-    except Exception:
-        pass
-    finally:
-        if websocket.state not in (State.CLOSED, State.CLOSING):
-            try:
-                await websocket.close()
-            except Exception:
-                pass
-
-
-async def handle_websocket(connection):
-    '''处理 WebSocket 连接'''
-    global connection_count
+        
+        print('\033c', end='')
+        print('App is running')
+        print('Thank you for using this script, enjoy!')
     
-    with connections_lock:
-        global active_connections
-        connection_count += 1
-        active_connections += 1
-        conn_id = f'#{connection_count}'
-        active = active_connections
+    threading.Thread(target=_cleanup, daemon=True).start()
     
-    websocket = connection
-    stats = {'uplink': 0, 'downlink': 0}
-    start_time = time.time()
-
-    if LOG_LEVEL == 'INFO':
-        logger.info(f'{conn_id} 新连接 (活跃: {active})')
-
-    async with CONNECTION_SEMAPHORE:
-        remote_reader = remote_writer = None
-        try:
-            initial = await asyncio.wait_for(websocket.recv(), timeout=30)
-
-            if not isinstance(initial, (bytes, bytearray)) or len(initial) < 18:
-                return
-            
-            if initial[1:17] != UUID_BYTES:
-                return
-
-            await websocket.send(initial[0:1] + b'\x00')
-
-            addon_len = initial[17]
-            i = 18 + addon_len
-
-            cmd = initial[i]
-            i += 1
-            
-            if cmd != 1:
-                return
-
-            port = int.from_bytes(initial[i:i+2], 'big')
-            i += 2
-            
-            addr_type = initial[i]
-            i += 1
-
-            if addr_type == 1:
-                host = socket.inet_ntoa(initial[i:i+4])
-                i += 4
-            elif addr_type = 2:
-                length = initial[i]
-                i += 1
-                host = initial[i:i+length].decode('utf-8', errors='ignore')
-                i += length
-            elif addr_type == 3:
-                host = socket.inet_ntop(socket.AF_INET6, initial[i:i+16])
-                i += 16
-            else:
-                return
-
-            if LOG_LEVEL == 'INFO':
-                logger.info(f'{conn_id} → {host}:{port}')
-            elif LOG_LEVEL == 'DEBUG':
-                logger.debug(f'{conn_id} 目标: {host}:{port}')
-
-            remote_reader, remote_writer = await asyncio.wait_for(
-                asyncio.open_connection(host, port), timeout=15
-            )
-
-            sock = remote_writer.get_extra_info('socket')
-            if sock:
-                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-
-            remaining = initial[i:]
-            if remaining:
-                stats['uplink'] += len(remaining)
-                remote_writer.write(remaining)
-                await remote_writer.drain()
-
-            t1 = asyncio.create_task(
-                forward_ws_to_remote(websocket, remote_writer, stats, conn_id)
-            )
-            t2 = asyncio.create_task(
-                forward_remote_to_ws(remote_reader, websocket, stats, conn_id)
-            )
-            done, pending = await asyncio.wait(
-                [t1, t2], return_when=asyncio.FIRST_COMPLETED
-            )
-            
-            for p in pending:
-                p.cancel()
-                try:
-                    await p
-                except asyncio.CancelledError:
-                    pass
-            
-            duration = time.time() - start_time
-            if LOG_LEVEL == 'INFO':
-                up_kb = stats['uplink'] / 1024
-                down_kb = stats['downlink'] / 1024
-                logger.info(f'{conn_id} 关闭 {duration:.1f}s ↑{up_kb:.1f}KB ↓{down_kb:.1f}KB')
-            elif LOG_LEVEL == 'DEBUG':
-                logger.debug(
-                    f'{conn_id} 关闭 | {duration:.2f}s | '
-                    f'↑{stats["uplink"]} ↓{stats["downlink"]}'
-                )
-
-        except asyncio.TimeoutError:
-            if LOG_LEVEL == 'DEBUG':
-                logger.debug(f'{conn_id} 超时')
-        except Exception as e:
-            error_msg = str(e)
-            if '1000' not in error_msg and 'OK' not in error_msg:
-                if LOG_LEVEL == 'DEBUG':
-                    logger.debug(f'{conn_id} 异常: {e}')
-        finally:
-            with connections_lock:
-                active_connections -= 1
-            
-            if remote_writer and not remote_writer.is_closing():
-                try:
-                    remote_writer.close()
-                    await remote_writer.wait_closed()
-                except Exception:
-                    pass
-            
-            if websocket.state not in (State.CLOSED, State.CLOSING):
-                try:
-                    await websocket.close()
-                except Exception:
-                    pass
-
-
-async def initialize_komari():
-    '''初始化 Komari 监控'''
-    komari = KomariManager()
+async def start_server():
+    delete_nodes()
+    cleanup_old_files()
+    create_directory()
+    argo_type()
+    await download_files_and_run()
+    add_visit_task()
     
-    if not komari.enabled:
-        logger.info('Komari 监控未配置')
-        return None
+    server_thread = Thread(target=run_server)
+    server_thread.daemon = True
+    server_thread.start()   
     
-    if not FILE_PATH.exists():
-        FILE_PATH.mkdir(parents=True)
-        logger.info(f'✓ 创建目录: {FILE_PATH}')
+    clean_files()
     
-    if await komari.download_agent():
-        await asyncio.sleep(1)
-        if komari.start():
-            await komari.check_status()
-            return komari
+def run_server():
+    server = HTTPServer(('0.0.0.0', PORT), RequestHandler)
+    print(f"Server is running on port {PORT}")
+    print(f"Running done！")
+    print(f"\nLogs will be delete in 90 seconds")
+    server.serve_forever()
     
-    return None
-
-
-async def main():
-    '''启动 WebSocket 服务器'''
-    import websockets
+def run_async():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(start_server()) 
     
-    server_config = {
-        'max_size': 32 * 1024,
-        'max_queue': 16,
-        'ping_interval': 60,
-        'ping_timeout': 30,
-        'close_timeout': 15,
-        'compression': None,
-    }
-
-    logger.info('=' * 60)
-    logger.info('🚀 VLESS-WS 代理服务器 + Komari监控')
-    logger.info('=' * 60)
-    logger.info(f'  监听: {LISTEN_HOST}:{PORT}')
-    logger.info(f'  域名: {DOMAIN}')
-    logger.info(f'  路径: {WS_PATH}')
-    logger.info(f'  节点: {NODE_NAME}')
-    logger.info(f'  最大连接: {MAX_CONNECTIONS}')
-    
-    komari_info = '未配置'
-    if KOMARI_ENDPOINT:
-        komari_info = f'{KOMARI_ENDPOINT}'
-    logger.info(f'  Komari监控: {komari_info}')
-    logger.info('=' * 60)
-
-    komari = await initialize_komari()
-    
-    if komari:
-        asyncio.create_task(komari.monitor_agent_health())
-
-    async with websockets.serve(
-        handle_websocket,
-        LISTEN_HOST,
-        PORT,
-        process_request=process_http_request,
-        server_header=None,
-        **server_config,
-    ):
-        logger.info('✓ 服务器启动成功')
-        await asyncio.Future()
-
-
-if __name__ == '__main__':
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info('\n服务器正在关闭...')
-    except Exception as e:
-        logger.error(f'服务器启动失败: {e}')
-        import traceback
-        traceback.print_exc()
+    while True:
+        time.sleep(3600)
+        
+if __name__ == "__main__":
+    run_async()
